@@ -16,8 +16,12 @@ namespace SDA.FiscalDevice
         #region Members
         public Tfhka Bixolon = new Tfhka();
         public PrinterStatus PStatus;
+        /// <summary>
+        /// Raises the S5 status of the Fiscal Printer to the PC and updates its data
+        /// </summary>
         public S5PrinterData MyS5PrinterData;
         public string comPort;
+        public DateTime dateLastZ;
         #endregion
         public FiscalDeviceCapabilities Capabilities
         {
@@ -95,52 +99,39 @@ namespace SDA.FiscalDevice
         public Result Install(FiscalDeviceConfiguration configuration)
         {
             WriteToTrace("#####     Method :: Install    ####");
-            // Get the configuration port
             comPort = configuration.CommunicationChannel;
-            // Test Communication Port status 
-            if (Bixolon.OpenFpCtrl(comPort))
+            if (Bixolon.CheckFPrinter() == false)
             {
-                WriteToTrace("Install :: Communication port opened before installation, closing port: " + comPort);
-                Bixolon.CloseFpCtrl();
-                return new Result(false);
-            }
-            else
-            {
-                WriteToTrace("Install :: Opening communication port " + comPort);
-                if (Bixolon.OpenFpCtrl(comPort))
+                if (Reinstall())
                 {
-                    if (Bixolon.CheckFPrinter())
+                    if (DeviceAvaileableMemory())
                     {
-                        WriteToTrace("Install :: Printer Connected");
-                        // TODO 
-                        // Get printer status
-                        // Get Z report
+                        EmitU0ZReport();
                         return new Result(true);
                     }
                     else
-                    {
-                        WriteToTrace("Install :: Printer Not Connected");
-                        // TODO
-                        // Get printer status object
-                        PStatus = Bixolon.GetPrinterStatus();
-                        WriteToTrace("Install :: Error, printer status error code: " + PStatus.PrinterErrorCode);
-                        WriteToTrace("Install :: Error, printer status error description " + PStatus.PrinterErrorDescription);
-                        // Close com port
-                        Bixolon.CloseFpCtrl();
                         return new Result(false);
-                    }
                 }
                 else
-                {
-                    //TODO : Get printer status, to detect error.
-                    // Close com port
                     return new Result(false);
-                }
             }
+            return new Result(false);
         }
 
         public void Notify(int notificationId)
         {
+            WriteToTrace("####      Method :: Notify      ####");
+            switch (notificationId)
+            {
+                // Close notification Dialog
+                case 1:
+                    // if service dialog activated, close it.
+                    // TODO service dialog
+                    break; 
+                default:
+                    // Exit method.
+                    break;
+            }
             throw new NotImplementedException();
         }
 
@@ -179,14 +170,90 @@ namespace SDA.FiscalDevice
             }
         }
         /// <summary>
-        /// Verifies the Bixolon printer status, returning true/false depending on it.
+        /// Verifies the Bixolon printer availeable memory, returning true/false depending on it.
         /// </summary>
         /// <returns>Boolean</returns>
-        public Boolean DeviceStatus()
+        public Boolean DeviceAvaileableMemory()
         {
-
-            return true;
+            WriteToTrace("####  Method :: DeviceAvaileableMemory    ####");
+            try
+            {
+                MyS5PrinterData = Bixolon.GetS5PrinterData();
+                if (MyS5PrinterData.AuditMemoryFreeCapacity > 0)
+                {
+                    WriteToTrace("DeviceAvaileableMemory :: Availeable " + MyS5PrinterData.AuditMemoryFreeCapacity.ToString() + " MB");
+                    return true;
+                }
+                else
+                {
+                    WriteToTrace("DeviceAvaileableMemory :: Insufficient");
+                    return false;
+                }
+            }
+            catch (PrinterException e)
+            {
+                WriteToTrace("DeviceAvaileableMemory :: PrinterException" + e.Message);
+                return false;
+            }
         }
+        /// <summary>
+        /// Reinstalls the device.
+        /// </summary>
+        /// <returns></returns>
+        public Boolean Reinstall()
+        {
+            WriteToTrace("####      Method :: Reinstall     ####");
+            // Close com port
+            Bixolon.CloseFpCtrl();
+            // Open com port
+            if (Bixolon.OpenFpCtrl(comPort))
+            {
+                WriteToTrace("Reinstall :: Com port " + comPort + " reopened");
+                return true;
+            }
+            else
+            {
+                WriteToTrace("Reinstall :: Com port" + comPort +" not opened");
+                if (!Bixolon.CheckFPrinter())
+                {
+                    PStatus = Bixolon.GetPrinterStatus();
+                    WriteToTrace("Install :: Error, printer status error code: " + PStatus.PrinterErrorCode);
+                    WriteToTrace("Install :: Error, printer status error description " + PStatus.PrinterErrorDescription);
+                    return false;
+                }
+                return false;
+            }
+            
+        }
+
+        public Boolean EmitU0ZReport()
+        {
+            WriteToTrace("####      Method :: EmitU0ZReport     ####");
+            
+            DateTime today = DateTime.Now;
+            TimeSpan diffdate;
+            ReportData Report;
+            try
+            {
+                Report = Bixolon.GetZReport();
+                dateLastZ = Report.ZReportDate;
+                diffdate = today.Subtract(dateLastZ);
+                WriteToTrace("EmitU0ZReport ::  Last Z rerport " + dateLastZ.ToString());
+                WriteToTrace("EmitU0ZReport ::  Diffdate in days " + diffdate.Days.ToString());
+                // Z report with previus day date.
+                if (diffdate.Days > 1)
+                    return false;
+                else
+                    return true;
+            }
+            catch (PrinterException e)
+            {
+                WriteToTrace("EmitU0ZReport :: PrinterException " + e.Message + " Data" + e.Data + " InnerException" + e.InnerException + " Source" + e.Source + " TargetSite" + e.TargetSite);
+                return false;
+            }
+
+        }
+
         #endregion
     }
 }
